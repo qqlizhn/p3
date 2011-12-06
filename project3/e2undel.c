@@ -14,6 +14,7 @@
 int main (int argc, char* argv[]) {
   int fd, ret;
   ext2_super_block super_block;
+  ext2_group_desc group_description;
 
   // Check that argc > 0, if not print error and exit.
   if (argc < 2) {
@@ -37,6 +38,7 @@ int main (int argc, char* argv[]) {
   assert(read(fd, &super_block, sizeof(super_block)) == sizeof(super_block));
   printf("%d", super_block.s_inodes_count);
 
+  // Next visit the 
   // Visit each 'free' inode and print:
   // * inode number
   // * delete time
