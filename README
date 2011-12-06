@@ -1,0 +1,9 @@
+CSE 451 Autumn '11 Project 3 Undelete
+
+e2undel accepts an Ext2 file system and attempts to recover deleted files. These
+are placed in a recoveredFiles directory and named file-nnnn where nnnn is the
+original inode number for the recovered file. For more information, see
+http://www.cs.washington.edu/education/courses/cse451/11au/projects/project3.shtml.
+
+Files are only recovered if deemed uncorrupted, ie in cases where only partial
+recovery is possible e2undel will not attempt to recover any of the file.
