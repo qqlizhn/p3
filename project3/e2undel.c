@@ -20,6 +20,12 @@ int getGroupDescOffset(int group, int table_offset, int desc_size);
 int getByteOffset(int block_number, int first_data_block, int block_size); 
 int getBlockNumOfGroupDescTable(int first_data_block, int block_size);
 
+struct inode_node {
+  ext2_inode data;
+  inode_node * next;
+}
+static inode_node * RECOVERY_CANDIDATES = NULL;
+
 
 int main (int argc, char* argv[]) {
   int i, fd, block_size, num_blocks, blocks_per_group, block_groups;
@@ -148,11 +154,8 @@ void explore_inodes(int fd, struct ext2_group_desc * group_desc, int block_size,
   }
   free(bitmap);
 }
-
-
-
 void explore_inode(int local_inode_index, int inode_table_block, int inode_size, int fd, int block_size, int first_data_block, int inode_number, int active, int inodes_per_group) {
-  struct ext2_inode * inode; 
+  struct inode_node * inode; 
   int i;
 
   // Need to grab the inode. First seek to the apporpriate byte offset.
@@ -162,20 +165,21 @@ void explore_inode(int local_inode_index, int inode_table_block, int inode_size,
 
   char * the_block; 
   // Read the inode.
-  inode = (struct ext2_inode *) malloc(sizeof(struct ext2_inode));
-  read(fd, inode, sizeof(inode));
+  inode = (struct inode_node *) malloc(sizeof(struct inode_node));
+  read(fd, inode, sizeof(struct ext2_inode));
   
-  if (inode->i_size != 0) {
+  if (inode->data.i_size != 0) {
     // This is a candidate file which may have been deleted. 
 
     // First use the i_ctime field to store the indoe_number. We're not going to
     // write this to disk, but we want to keep the inode number associated with the
     // inode in case we end up recovering this file later.
-    inode->i_ctime = inode_number;
+    inode->data.i_ctime = inode_number;
 
     // Now we'll add this inode to the list of candidates.
-    
-    
+    inode->next = RECOVERY_CANDIDATES; 
+    RECOVERY_CANDIDATES = inode;
+
     // printf("Examining inode #%d which has ", inode_number);
     // printf("Delete time: %d\n", inode.i_dtime);
     // printf("file size: %d and dtime %d \n", inode.i_size, inode.i_dtime);
