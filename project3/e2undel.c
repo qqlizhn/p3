@@ -21,10 +21,11 @@ int getByteOffset(int block_number, int first_data_block, int block_size);
 int getBlockNumOfGroupDescTable(int first_data_block, int block_size);
 
 struct inode_node {
-  ext2_inode data;
-  inode_node * next;
-}
-static inode_node * RECOVERY_CANDIDATES = NULL;
+  struct ext2_inode data;
+  struct inode_node * next;
+};
+
+static struct inode_node * RECOVERY_CANDIDATES = NULL;
 
 
 int main (int argc, char* argv[]) {
@@ -154,16 +155,15 @@ void explore_inodes(int fd, struct ext2_group_desc * group_desc, int block_size,
   }
   free(bitmap);
 }
+
 void explore_inode(int local_inode_index, int inode_table_block, int inode_size, int fd, int block_size, int first_data_block, int inode_number, int active, int inodes_per_group) {
   struct inode_node * inode; 
-  int i;
 
   // Need to grab the inode. First seek to the apporpriate byte offset.
   int inode_byte_offset = inode_size * local_inode_index;
   int byte = getByteOffset(inode_table_block, first_data_block, block_size) + inode_byte_offset;
   lseek(fd, byte, SEEK_SET);  
 
-  char * the_block; 
   // Read the inode.
   inode = (struct inode_node *) malloc(sizeof(struct inode_node));
   read(fd, inode, sizeof(struct ext2_inode));
