@@ -12,6 +12,8 @@
 #include <unistd.h>
 
 
+// void explore_blocks2(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int blocks_per_group, int block_group);
+int blockIsInUse(char * block_bitmap, int block_id, int first_data_block); 
 void explore_blocks(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int blocks_per_group, char * block_bitmap); 
 int compareBlockId(const void * first, const void * second); 
 struct inode_node * mergeSort(struct inode_node * head, int size); 
@@ -66,6 +68,7 @@ int main (int argc, char* argv[]) {
   }
 /*
   printf("Block size: %d\n", block_size);
+  printf("Starting at block: %d\n", super_block.s_first_data_block);
   printf("Number of blocks: %d\n", num_blocks);
   printf("Blocks per group: %d\n", blocks_per_group);
   printf("Number of block groups: %d\n", block_groups);
@@ -110,10 +113,15 @@ int main (int argc, char* argv[]) {
 
     // Explore all inodes in this block group.
     explore_inodes(fd, &group_description, block_size, super_block.s_first_data_block, first_inode_index, group_description.bg_inode_table, super_block.s_inode_size, i, super_block.s_inodes_per_group);
-    explore_blocks(fd, &group_description, block_size, super_block.s_first_data_block, blocks_per_group, block_bitmaps[current_block_bitmap_offset]);
+    explore_blocks(fd, &group_description, block_size, super_block.s_first_data_block, blocks_per_group, &block_bitmap[current_block_bitmap_offset]);
     current_block_bitmap_offset += blocks_per_group / 8;
+    //explore_blocks2(fd, &group_description, block_size, super_block.s_first_data_block, blocks_per_group, i);
   }
-
+ /* for (i = super_block.s_first_data_block; i <= num_blocks; i++) {
+    if (blockIsInUse(block_bitmap, i, super_block.s_first_data_block)) {
+      printf("Block id #%d is not free.\n", i);
+    }
+ }*/
 /*
   struct inode_node * current = RECOVERY_CANDIDATES;
   while (current != NULL) {
@@ -175,13 +183,49 @@ int main (int argc, char* argv[]) {
         block_array[size] = current->data.i_block[i];
         size++;
 
-        // TODO: also need to check that this block is still marked 'free'.
-        // If not, set recover to false.
+        // Check whether this block is marked 'free'.
+        if (blockIsInUse(block_bitmap, current->data.i_block[i], super_block.s_first_data_block)) {
+          // This block has already been reclaimed, so we should not recover
+          // the file.
+          recover = 0;
+        }
       }
     }
 
     if (recover) {
-      // TODO: Recover this candidate.
+      // Recover this candidate.
+      printf("We are going to recover file with inode #%d\n", current->data.i_ctime);
+     
+      // Buffer to hold data blocks.
+      char * the_block;
+
+      // Open and create the file with proper name.
+      // TODO: set the path correctly.
+      char path[26];
+      sprintf(path, "./recoveredFiles/file-%04d", current->data.i_ctime);
+      int recoveredFile = open(path, O_RDWR | O_CREAT); 
+
+      int remaining_bytes = current->data.i_size;
+
+      // Write all the data blocks of the file to the file.
+      for (i = 0; i < EXT2_N_BLOCKS; i++) {
+        if (current->data.i_block[i] == 0) {
+          // TODO: handle indirect blocks.
+          break;
+        }
+        int size_to_write = remaining_bytes % block_size;
+        lseek(fd, getByteOffset(current->data.i_block[i], super_block.s_first_data_block, block_size), SEEK_SET);
+        the_block = (char *) malloc(size_to_write);
+        assert(the_block != NULL);
+        read(fd, the_block, size_to_write);
+        remaining_bytes -= write(recoveredFile, the_block, size_to_write);
+        free(the_block);
+      } 
+      
+      // TODO: Set the modified and accessed times.
+      
+      // Close the file.
+      assert(close(recoveredFile) == 0);
     }
     
     // Free this candidate and continue to the next.
@@ -193,9 +237,19 @@ int main (int argc, char* argv[]) {
   // Free the block array.
   free(block_array);
 
+  // Free the block bitmap.
+  free(block_bitmap);
+
   assert(close(fd) == 0);
   return 0;
 }
+
+int blockIsInUse(char * block_bitmap, int block_id, int first_data_block) {
+  int index = block_id - first_data_block;
+  char byte = block_bitmap[index / 8];
+  int bit = (byte >> index % 8) & 1; 
+  return bit;
+} 
 
 int compareBlockId(const void * first, const void * second) {
   int a = *((int *) first);
@@ -260,6 +314,24 @@ struct inode_node * mergeSort(struct inode_node * head, int size) {
 int getGroupDescOffset(int group, int table_offset, int desc_size) {
   return table_offset + (group * desc_size);  
 }
+/*
+void explore_blocks2(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int blocks_per_group, int block_group) {
+  int i;
+  lseek(fd, getByteOffset(group_desc->bg_block_bitmap, first_data_block, block_size), SEEK_SET);
+  char * bitmap = (char *) malloc(blocks_per_group / 8);
+  assert(read(fd, bitmap, blocks_per_group / 8) == blocks_per_group / 8);
+   for (i = 0; i < blocks_per_group; i++) {
+    char byte = bitmap[i / 8];
+    int bit = (byte >> i % 8) & 1;
+    int block_id = (blocks_per_group * block_group) + i + first_data_block;
+    if (bit != 0) {
+      printf("Block id #%d is not free.\n", block_id);
+    }
+  }
+
+  free(bitmap);
+}
+*/
 
 void explore_blocks(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int blocks_per_group, char * block_bitmap) {
   lseek(fd, getByteOffset(group_desc->bg_block_bitmap, first_data_block, block_size), SEEK_SET);
