@@ -11,30 +11,27 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-
-// void explore_blocks2(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int blocks_per_group, int block_group);
-int blockIsInUse(char * block_bitmap, int block_id, int first_data_block); 
-void explore_blocks(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int blocks_per_group, char * block_bitmap); 
+void explore_inode(int local_inode_index, int inode_table_block, int inode_number);
+int getByteOffset(int block_number); 
+int getGroupDescOffset(int group, int table_offset, int desc_size);
+int blockIsInUse(char * block_bitmap, int block_id); 
+void explore_blocks(struct ext2_group_desc * group_desc, int blocks_per_group, char * block_bitmap); 
 int compareBlockId(const void * first, const void * second); 
 struct inode_node * mergeSort(struct inode_node * head, int size); 
-void explore_inode(int local_inode_index, int inode_table_block, int inode_size, int fd, int block_size, int first_data_block, int inode_number, int active, int inodes_per_group);
-void explore_inodes(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int first_inode, int inode_table_block, int inode_size, int block_group, int inodes_per_group); 
-int getBlock(int byte_offset, int first_data_block, int block_size); 
-int getGroupDescOffset(int group, int table_offset, int desc_size);
-int getByteOffset(int block_number, int first_data_block, int block_size); 
-int getBlockNumOfGroupDescTable(int first_data_block, int block_size);
+void explore_inodes(struct ext2_group_desc * group_desc, int block_group, int first_inode); 
 
 struct inode_node {
   struct ext2_inode data;
   struct inode_node * next;
 };
 
+static struct ext2_super_block super_block;
 static struct inode_node * RECOVERY_CANDIDATES = NULL;
 static int NUM_CANDIDATES = 0;
+static int fd;
 
 int main (int argc, char* argv[]) {
-  int i, fd, block_size, num_blocks, blocks_per_group, block_groups;
-  struct ext2_super_block super_block;
+  int i, blocks_per_group, block_groups;
   struct ext2_group_desc group_description;
 
   // Check that argc > 0, if not print error and exit.
@@ -49,10 +46,6 @@ int main (int argc, char* argv[]) {
     printf("Unable to open %s. Provide valid Ext2 file system.\n", argv[1]);
     return -1;
   }
-  int big_num = 2147483646;
-  long long next_bits = 2;
-  long long file_size = big_num + (next_bits << 31);
-  printf("file size %lld\n", file_size);
  
  
   // Now we'll read the superblock to determine locations of block groups:
@@ -62,14 +55,13 @@ int main (int argc, char* argv[]) {
 
   assert(read(fd, &super_block, sizeof(super_block)) == sizeof(super_block));
   block_size = 1024 << super_block.s_log_block_size;
-  num_blocks = super_block.s_blocks_count;
   blocks_per_group = super_block.s_blocks_per_group;
   
-  if (num_blocks <= blocks_per_group) {
+  if (super_block.s_blocks_count <= blocks_per_group) {
     block_groups = 1;
-    blocks_per_group = num_blocks; 
+    blocks_per_group = super_block.s_blocks_count; 
   } else {
-    block_groups = num_blocks / blocks_per_group; 
+    block_groups = super_block.s_blocks_count / blocks_per_group; 
   }
 /*
   printf("Revision Number: %d\n", super_block.s_rev_level);
@@ -80,13 +72,12 @@ int main (int argc, char* argv[]) {
   printf("Number of block groups: %d\n", block_groups);
   printf("The first data block (ie the one containing the superblock is block %d\n", super_block.s_first_data_block);  
   printf("The size of the superblock is %d or %d kb \n", SUPERBLOCK_SIZE, SUPERBLOCK_SIZE / 1024);
-  printf("The group description block table begins in block %d\n", getBlockNumOfGroupDescTable(super_block.s_first_data_block, block_size));
   printf("The size of a group description is %d bytes\n", (int) sizeof(group_description));  
   printf("Number of inodes per group: %d\n", super_block.s_inodes_per_group);
   printf("\n");
  */ 
 
-  // We'll read all of the block bitmaps into memory, into this single array.
+  // We'll read all of the block bitmaps into memory into this single array.
   char * block_bitmap = (char *) malloc((blocks_per_group * block_groups) / 8);
   int current_block_bitmap_offset = 0;
 
@@ -106,7 +97,6 @@ int main (int argc, char* argv[]) {
     printf("the block bitmap is located at %d\n", group_description.bg_block_bitmap);
     printf("the inode bitmap is located at %d\n", group_description.bg_inode_bitmap);
     printf("the inode table is located at %d\n", group_description.bg_inode_table);
-    printf("this description is located in block %d\n", getBlock(cur_desc_offset, super_block.s_first_data_block, block_size));
     printf("\n"); */
 
     // The first few inodes are not available for standard files, so we probably
@@ -118,32 +108,14 @@ int main (int argc, char* argv[]) {
     }
 
     // Explore all inodes in this block group.
-    explore_inodes(fd, &group_description, block_size, super_block.s_first_data_block, first_inode_index, group_description.bg_inode_table, super_block.s_inode_size, i, super_block.s_inodes_per_group);
-    explore_blocks(fd, &group_description, block_size, super_block.s_first_data_block, blocks_per_group, &block_bitmap[current_block_bitmap_offset]);
+    explore_inodes(&group_description, i, first_inode_index);
+    explore_blocks(&group_description, blocks_per_group, &block_bitmap[current_block_bitmap_offset]);
     current_block_bitmap_offset += blocks_per_group / 8;
-    //explore_blocks2(fd, &group_description, block_size, super_block.s_first_data_block, blocks_per_group, i);
   }
- /* for (i = super_block.s_first_data_block; i <= num_blocks; i++) {
-    if (blockIsInUse(block_bitmap, i, super_block.s_first_data_block)) {
-      printf("Block id #%d is not free.\n", i);
-    }
- }*/
-/*
-  struct inode_node * current = RECOVERY_CANDIDATES;
-  while (current != NULL) {
-    printf("candidate with inode #%d has dtime %d\n", current->data.i_ctime, current->data.i_dtime);
-    current = current->next;
-  }*/
+  
   // Sort the candidate list with merge sort by comparing dtines (larger
   // dtime = earlier in the list).
   RECOVERY_CANDIDATES = mergeSort(RECOVERY_CANDIDATES, NUM_CANDIDATES);
-  /*printf("After sorting:\n");
-  current = RECOVERY_CANDIDATES;
-  while (current != NULL) {
-    printf("candidate with inode #%d has dtime %d\n", current->data.i_ctime, current->data.i_dtime);
-    current = current->next;
-  }
-*/
   
   int size = 0;
   int capacity = 100;
@@ -191,7 +163,7 @@ int main (int argc, char* argv[]) {
         size++;
 
         // Check whether this block is marked 'free'.
-        if (blockIsInUse(block_bitmap, current->data.i_block[i], super_block.s_first_data_block)) {
+        if (blockIsInUse(block_bitmap, current->data.i_block[i])) {
           // This block has already been reclaimed, so we should not recover
           // the file.
           recover = 0;
@@ -200,7 +172,7 @@ int main (int argc, char* argv[]) {
     }
 
     if (explore_indirect_block) {
-      lseek(fd, getByteOffset(current->data.i_block[12], super_block.s_first_data_block, block_size), SEEK_SET);
+      lseek(fd, getByteOffset(current->data.i_block[12]), SEEK_SET);
       int32_t * first_indirect_block = (int32_t *) malloc(block_size);
       assert(first_indirect_block != NULL);
       assert(read(fd, first_indirect_block, block_size) == block_size);
@@ -240,7 +212,7 @@ int main (int argc, char* argv[]) {
           size_to_write = block_size;
         }
 
-        lseek(fd, getByteOffset(current->data.i_block[i], super_block.s_first_data_block, block_size), SEEK_SET);
+        lseek(fd, getByteOffset(current->data.i_block[i]), SEEK_SET);
         printf("attempting to read %d bytes\n", size_to_write);
         the_block = (char *) malloc(size_to_write);
         assert(the_block != NULL);
@@ -271,8 +243,8 @@ int main (int argc, char* argv[]) {
   return 0;
 }
 
-int blockIsInUse(char * block_bitmap, int block_id, int first_data_block) {
-  int index = block_id - first_data_block;
+int blockIsInUse(char * block_bitmap, int block_id) {
+  int index = block_id - super_block.s_first_data_block;
   char byte = block_bitmap[index / 8];
   int bit = (byte >> index % 8) & 1; 
   return bit;
@@ -341,55 +313,28 @@ struct inode_node * mergeSort(struct inode_node * head, int size) {
 int getGroupDescOffset(int group, int table_offset, int desc_size) {
   return table_offset + (group * desc_size);  
 }
-/*
-void explore_blocks2(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int blocks_per_group, int block_group) {
-  int i;
-  lseek(fd, getByteOffset(group_desc->bg_block_bitmap, first_data_block, block_size), SEEK_SET);
-  char * bitmap = (char *) malloc(blocks_per_group / 8);
-  assert(read(fd, bitmap, blocks_per_group / 8) == blocks_per_group / 8);
-   for (i = 0; i < blocks_per_group; i++) {
-    char byte = bitmap[i / 8];
-    int bit = (byte >> i % 8) & 1;
-    int block_id = (blocks_per_group * block_group) + i + first_data_block;
-    if (bit != 0) {
-      printf("Block id #%d is not free.\n", block_id);
-    }
-  }
 
-  free(bitmap);
-}
-*/
-
-void explore_blocks(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int blocks_per_group, char * block_bitmap) {
-  lseek(fd, getByteOffset(group_desc->bg_block_bitmap, first_data_block, block_size), SEEK_SET);
-  
+void explore_blocks(struct ext2_group_desc * group_desc, int blocks_per_group, char * block_bitmap) {
+  lseek(fd, getByteOffset(group_desc->bg_block_bitmap), SEEK_SET);
   assert(read(fd, block_bitmap, blocks_per_group / 8) == blocks_per_group / 8);
-/*  for (i = 0; i < blocks_per_group; i++) {
-    char byte = bitmap[i / 8];
-    int bit = (byte >> i % 8) & 1;
-    int block_id = (blocks_per_group * block_group) + i + first_data_block;
-    printf("Block with local index %d, id #%d, in group %d is active? --> %d\n", i, block_id, block_group, bit);
-  }
-
-  free(bitmap);*/
 }
 
-void explore_inodes(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int first_inode, int inode_table_block, int inode_size, int block_group, int inodes_per_group) {
+void explore_inodes(struct ext2_group_desc * group_desc, int block_group, int
+  first_inode) {
   int i;
-  //printf("Exploring block group %d, which has %d dedicated directory inodes\n", block_group, group_desc->bg_used_dirs_count);
   
   // Seek to the location of the inode bit map.
-  lseek(fd, getByteOffset(group_desc->bg_inode_bitmap, first_data_block, block_size), SEEK_SET);
+  lseek(fd, getByteOffset(group_desc->bg_inode_bitmap), SEEK_SET);
 
   // Allocated space for the bit map on the heap. This is one char per every 8
   // inodes, since each inode will be represented with a single bit.
-  char * bitmap = (char *) malloc(inodes_per_group / 8);
+  char * bitmap = (char *) malloc(super_block.s_inodes_per_group / 8);
   assert(bitmap != NULL);
   
   // Copy the bitmap into main memory.
-  assert(read(fd, bitmap, inodes_per_group / 8) == inodes_per_group / 8);
+  assert(read(fd, bitmap, super_block.s_inodes_per_group / 8) == super_block.s_inodes_per_group / 8);
   // Loop over each bit in the bitmap, if 0 we have a 'free' inode to examine. 
-  for (i = first_inode; i < inodes_per_group; i++) {
+  for (i = first_inode; i < super_block.s_inodes_per_group; i++) {
     char byte = bitmap[i / 8];
     int bit = (byte >> i % 8) & 1; 
     if (bit == 0) {
@@ -398,19 +343,19 @@ void explore_inodes(int fd, struct ext2_group_desc * group_desc, int block_size,
       // Inodes start at inode 1. The inode number of this inode then must be 1
       // plus the number of inodes in previous blocks plus the current index in
       // this bitmap.
-      int inode_number = 1 + (block_group * inodes_per_group) + i;
-      explore_inode(i, inode_table_block, inode_size, fd, block_size, first_data_block, inode_number, bit, inodes_per_group);  
+      int inode_number = 1 + (block_group * super_block.s_inodes_per_group) + i;
+      explore_inode(i, group_desc->bg_inode_table, inode_number);  
    }
   }
   free(bitmap);
 }
 
-void explore_inode(int local_inode_index, int inode_table_block, int inode_size, int fd, int block_size, int first_data_block, int inode_number, int active, int inodes_per_group) {
+void explore_inode(int local_inode_index, int inode_table_block, int inode_number) {
   struct inode_node * inode; 
 
   // Need to grab the inode. First seek to the apporpriate byte offset.
-  int inode_byte_offset = inode_size * local_inode_index;
-  int byte = getByteOffset(inode_table_block, first_data_block, block_size) + inode_byte_offset;
+  int inode_byte_offset = super_block.s_inode_size * local_inode_index;
+  int byte = getByteOffset(inode_table_block) + inode_byte_offset;
   lseek(fd, byte, SEEK_SET);  
 
   // Read the inode.
@@ -454,7 +399,7 @@ void explore_inode(int local_inode_index, int inode_table_block, int inode_size,
         // break;
       // }
       // Now let's go fetch the block.
-      // lseek(fd, getByteOffset(inode.i_block[i], first_data_block, block_size), SEEK_SET);
+      // lseek(fd, getByteOffset(inode.i_block[i], super_block.s_first_data_block, block_size), SEEK_SET);
       // the_block = (char *) malloc(block_size / 8);
       // assert(the_block != NULL);
       // read(fd, the_block, block_size / 8);
@@ -468,25 +413,7 @@ void explore_inode(int local_inode_index, int inode_table_block, int inode_size,
   }
 }
 
-
-int getBlockNumOfGroupDescTable(int first_data_block, int block_size) {
-  int blocks_for_super_block;
-  if (SUPERBLOCK_SIZE <= block_size) {
-    blocks_for_super_block = 1;
-  } else {
-    blocks_for_super_block = SUPERBLOCK_SIZE / block_size;
-    if (SUPERBLOCK_SIZE % block_size != 0) {
-      blocks_for_super_block++;
-    }
-  }
-  return first_data_block + blocks_for_super_block;
-}
-
-int getBlock(int byte_offset, int first_data_block, int block_size) {
-  return first_data_block + ((byte_offset - SUPERBLOCK_OFFSET) / block_size); 
-}
-
 /* Returns the byte offset for the given block number */
-int getByteOffset(int block_number, int first_data_block, int block_size) {
-  return SUPERBLOCK_OFFSET + (block_size * (block_number - first_data_block));
+int getByteOffset(int block_number) {
+  return SUPERBLOCK_OFFSET + (super_block.s_log_block_size * (block_number - super_block.s_first_data_block));
 }
