@@ -29,6 +29,7 @@ static struct ext2_super_block super_block;
 static struct inode_node * RECOVERY_CANDIDATES = NULL;
 static int NUM_CANDIDATES = 0;
 static int fd;
+static int block_size;
 
 int main (int argc, char* argv[]) {
   int i, blocks_per_group, block_groups;
@@ -415,5 +416,5 @@ void explore_inode(int local_inode_index, int inode_table_block, int inode_numbe
 
 /* Returns the byte offset for the given block number */
 int getByteOffset(int block_number) {
-  return SUPERBLOCK_OFFSET + (super_block.s_log_block_size * (block_number - super_block.s_first_data_block));
+  return SUPERBLOCK_OFFSET + (block_size * (block_number - super_block.s_first_data_block));
 }
