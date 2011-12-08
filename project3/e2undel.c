@@ -100,6 +100,24 @@ int main (int argc, char* argv[]) {
    // explore_blocks(fd, &group_description, block_size, super_block.s_first_data_block, i, blocks_per_group);
   }
 
+
+  struct inode_node * current = RECOVERY_CANDIDATES;
+  while (current != NULL) {
+    printf("candidate with inode #%d has dtime %d\n", current->data.i_ctime, current->data.i_dtime);
+    current = current->next;
+  }
+  // TODO: sort the candidate list with merge sort by comparing dtines (larger
+  // dtime = earlier in the list).
+  // TODO: go through each candidate, add blocks to a dynamically growing array
+  // of sorted integers (use binary search, etc.)
+  // If there ever is a collision, the current candidate should not be restored
+  // and should be freed.
+  // Once finished, go through teh candidates again and restore each candidate
+  // by writing its blocks to a new file with proper name, accessed and modified
+  // times.
+  // Must be careful though: we don't want to recover a file if any of its
+  // blocks are not marked free. This can probably happen either now, or when
+  // adding blocks to the array.
   assert(close(fd) == 0);
   return 0;
 }
