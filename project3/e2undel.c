@@ -12,9 +12,9 @@
 #include <unistd.h>
 
 
+void explore_blocks(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int blocks_per_group, char * block_bitmap); 
 int compareBlockId(const void * first, const void * second); 
 struct inode_node * mergeSort(struct inode_node * head, int size); 
-void explore_blocks(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int block_group, int blocks_per_group);
 void explore_inode(int local_inode_index, int inode_table_block, int inode_size, int fd, int block_size, int first_data_block, int inode_number, int active, int inodes_per_group);
 void explore_inodes(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int first_inode, int inode_table_block, int inode_size, int block_group, int inodes_per_group); 
 int getBlock(int byte_offset, int first_data_block, int block_size); 
@@ -76,6 +76,12 @@ int main (int argc, char* argv[]) {
   printf("Number of inodes per group: %d\n", super_block.s_inodes_per_group);
   printf("\n");
  */ 
+
+  // We'll read all of the block bitmaps into memory, into this single array.
+  char * block_bitmap = (char *) malloc((blocks_per_group * block_groups) / 8);
+  int current_block_bitmap_offset = 0;
+
+  // Flag for whether to take the s_first_ino into account.
   int first_block_flag = 1;
 
   // Next visit block group descriptor entry.
@@ -93,13 +99,19 @@ int main (int argc, char* argv[]) {
     printf("the inode table is located at %d\n", group_description.bg_inode_table);
     printf("this description is located in block %d\n", getBlock(cur_desc_offset, super_block.s_first_data_block, block_size));
     printf("\n"); */
+
+    // The first few inodes are not available for standard files, so we probably
+    // shouldn't bother looking at them.
     int first_inode_index = 0;
     if (first_block_flag) {
       first_inode_index = super_block.s_first_ino;
       first_block_flag = 0;
     }
+
+    // Explore all inodes in this block group.
     explore_inodes(fd, &group_description, block_size, super_block.s_first_data_block, first_inode_index, group_description.bg_inode_table, super_block.s_inode_size, i, super_block.s_inodes_per_group);
-   // explore_blocks(fd, &group_description, block_size, super_block.s_first_data_block, i, blocks_per_group);
+    explore_blocks(fd, &group_description, block_size, super_block.s_first_data_block, blocks_per_group, block_bitmaps[current_block_bitmap_offset]);
+    current_block_bitmap_offset += blocks_per_group / 8;
   }
 
 /*
@@ -172,8 +184,15 @@ int main (int argc, char* argv[]) {
       // TODO: Recover this candidate.
     }
     
-    // TODO: Free this candidate and continue to the next.
+    // Free this candidate and continue to the next.
+    struct inode_node * temp = current;
+    current = current->next;
+    free(temp);
   }
+
+  // Free the block array.
+  free(block_array);
+
   assert(close(fd) == 0);
   return 0;
 }
@@ -241,23 +260,20 @@ struct inode_node * mergeSort(struct inode_node * head, int size) {
 int getGroupDescOffset(int group, int table_offset, int desc_size) {
   return table_offset + (group * desc_size);  
 }
-/*
-void explore_blocks(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int block_group, int blocks_per_group) {
+
+void explore_blocks(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int blocks_per_group, char * block_bitmap) {
   lseek(fd, getByteOffset(group_desc->bg_block_bitmap, first_data_block, block_size), SEEK_SET);
-  int i;
-  char * bitmap = (char *) malloc(blocks_per_group / 8);
-  assert(bitmap != NULL);
   
-  assert(read(fd, bitmap, blocks_per_group / 8) == blocks_per_group / 8);
-  for (i = 0; i < blocks_per_group; i++) {
+  assert(read(fd, block_bitmap, blocks_per_group / 8) == blocks_per_group / 8);
+/*  for (i = 0; i < blocks_per_group; i++) {
     char byte = bitmap[i / 8];
     int bit = (byte >> i % 8) & 1;
     int block_id = (blocks_per_group * block_group) + i + first_data_block;
     printf("Block with local index %d, id #%d, in group %d is active? --> %d\n", i, block_id, block_group, bit);
   }
 
-  free(bitmap);
-}*/
+  free(bitmap);*/
+}
 
 void explore_inodes(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int first_inode, int inode_table_block, int inode_size, int block_group, int inodes_per_group) {
   int i;
