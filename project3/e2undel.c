@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 
+int compareBlockId(const void * first, const void * second); 
 struct inode_node * mergeSort(struct inode_node * head, int size); 
 void explore_blocks(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int block_group, int blocks_per_group);
 void explore_inode(int local_inode_index, int inode_table_block, int inode_size, int fd, int block_size, int first_data_block, int inode_number, int active, int inodes_per_group);
@@ -101,28 +102,86 @@ int main (int argc, char* argv[]) {
    // explore_blocks(fd, &group_description, block_size, super_block.s_first_data_block, i, blocks_per_group);
   }
 
-
+/*
   struct inode_node * current = RECOVERY_CANDIDATES;
   while (current != NULL) {
     printf("candidate with inode #%d has dtime %d\n", current->data.i_ctime, current->data.i_dtime);
     current = current->next;
-  }
-  // TODO: sort the candidate list with merge sort by comparing dtines (larger
+  }*/
+  // Sort the candidate list with merge sort by comparing dtines (larger
   // dtime = earlier in the list).
   RECOVERY_CANDIDATES = mergeSort(RECOVERY_CANDIDATES, NUM_CANDIDATES);
+  /*printf("After sorting:\n");
+  current = RECOVERY_CANDIDATES;
+  while (current != NULL) {
+    printf("candidate with inode #%d has dtime %d\n", current->data.i_ctime, current->data.i_dtime);
+    current = current->next;
+  }
+*/
+  
+  int size = 0;
+  int capacity = 100;
+  int * block_array = (int *) malloc(sizeof(int) * capacity);
+  assert(block_array != NULL);
+  struct inode_node * current = RECOVERY_CANDIDATES;
+  
+  while (current != NULL) {
+    int initial_size = size;
+    
+    // Flag indicating whether to recover this file. Default to yes.
+    int recover = 1;
 
-  // TODO: go through each candidate, add blocks to a dynamically growing array
-  // of sorted integers (use binary search, etc.)
-  // If there ever is a collision, the current candidate should not be restored
-  // and should be freed.
-  // Once finished, go through teh candidates again and restore each candidate
-  // by writing its blocks to a new file with proper name, accessed and modified
-  // times.
-  // Must be careful though: we don't want to recover a file if any of its
-  // blocks are not marked free. This can probably happen either now, or when
-  // adding blocks to the array.
+    // Do a quicksort on the array.
+    qsort((void *)block_array, initial_size, sizeof(int), compareBlockId);
+
+    // Loop over each block pointed to by this inode. Look up the block number
+    // in block_array, if present we won't recover this file. Also look up the
+    // block number in the block bitmap -- if not free, we won't recover. Add
+    // new block numbers to the block array (thus claiming them for this file's
+    // exclusive use).
+    for (i = 0; i < EXT2_N_BLOCKS; i++) {
+      if (current->data.i_block[i] == 0) {
+        // TODO: handle indirect blocks.
+        break;
+      }
+      if (bsearch((void *) &(current->data.i_block[i]), block_array, initial_size, sizeof(int), compareBlockId) != NULL) {
+        // This block has already been reclaimed by a file deleted later than this
+        // one. We won't end up recovering this file.
+        recover = 0;
+      } else {
+        // Will add this block to the array. May need to increase the array's
+        // capacity.
+        if (size == capacity) {
+          capacity = capacity * 2;
+          block_array = (int *) realloc(block_array, sizeof(int) * capacity);
+          assert(block_array != NULL);  // Not enough memory available to double
+                                        // the size of the array.
+                                        // That would be a pretty major issue
+                                        // for this implementation, so let's
+                                        // just fail.
+        }
+        block_array[size] = current->data.i_block[i];
+        size++;
+
+        // TODO: also need to check that this block is still marked 'free'.
+        // If not, set recover to false.
+      }
+    }
+
+    if (recover) {
+      // TODO: Recover this candidate.
+    }
+    
+    // TODO: Free this candidate and continue to the next.
+  }
   assert(close(fd) == 0);
   return 0;
+}
+
+int compareBlockId(const void * first, const void * second) {
+  int a = *((int *) first);
+  int b = *((int *) second);
+  return a - b;
 }
 
 struct inode_node * mergeSort(struct inode_node * head, int size) {
@@ -162,19 +221,19 @@ struct inode_node * mergeSort(struct inode_node * head, int size) {
   struct inode_node * current = result;
   while (first != NULL && second != NULL) {
     if (first->data.i_dtime >= second->data.i_dtime) {
-      current.next = first;  
-      first = first.next;
+      current->next = first;  
+      first = first->next;
     } else {
-      current.next = second;
-      second = second.next;
+      current->next = second;
+      second = second->next;
     }
-    current = current.next;
+    current = current->next;
   }
 
   if (first != NULL) {
-    current.next = first;
+    current->next = first;
   } else {
-    current.next = second;
+    current->next = second;
   }
   return result;
 }
