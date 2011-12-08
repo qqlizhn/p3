@@ -20,6 +20,8 @@ static int compareBlockId(const void * first, const void * second);
 static struct inode_node * mergeSort(struct inode_node * head, int size); 
 static void explore_inodes(struct ext2_group_desc * group_desc, int block_group, int first_inode); 
 
+static void examineCandidates();
+
 struct inode_node {
   struct ext2_inode data;
   struct inode_node * next;
@@ -98,7 +100,7 @@ int main (int argc, char* argv[]) {
     current_block_bitmap_offset += blocks_per_group / 8;
   }
   
-  examineCandidates();
+  examineCandidates(block_bitmap);
 
   // Free the block bitmap.
   free(block_bitmap);
@@ -108,11 +110,12 @@ int main (int argc, char* argv[]) {
 }
 
 
-void examineCandidates() {
+void examineCandidates(char * block_bitmap) {
   // Sort the candidate list with merge sort by comparing dtines (larger
   // dtime = earlier in the list).
   RECOVERY_CANDIDATES = mergeSort(RECOVERY_CANDIDATES, NUM_CANDIDATES);
   
+  int i;
   int size = 0;
   int capacity = 100;
   int * block_array = (int *) malloc(sizeof(int) * capacity);
@@ -170,8 +173,8 @@ void examineCandidates() {
     if (explore_indirect_block) {
       lseek(fd, getByteOffset(current->data.i_block[12]), SEEK_SET);
       int32_t * first_indirect_block = (int32_t *) malloc(block_size);
-      assert(first_indirect_block != NULL);
-      assert(read(fd, first_indirect_block, block_size) == block_size);
+      assert(super_block.s_first_indirect_block != NULL);
+      assert(read(fd, super_block.s_first_indirect_block, block_size) == block_size);
       for (i = 0; i < block_size / sizeof(int32_t); i++) {
         if (first_indirect_block[i] == 0) {
           break;
