@@ -49,7 +49,12 @@ int main (int argc, char* argv[]) {
     printf("Unable to open %s. Provide valid Ext2 file system.\n", argv[1]);
     return -1;
   }
-
+  int big_num = 2147483646;
+  long long next_bits = 2;
+  long long file_size = big_num + (next_bits << 31);
+  printf("file size %lld\n", file_size);
+ 
+ 
   // Now we'll read the superblock to determine locations of block groups:
 
   // First seek to superblock location, copy superblock struct.
@@ -67,6 +72,7 @@ int main (int argc, char* argv[]) {
     block_groups = num_blocks / blocks_per_group; 
   }
 /*
+  printf("Revision Number: %d\n", super_block.s_rev_level);
   printf("Block size: %d\n", block_size);
   printf("Starting at block: %d\n", super_block.s_first_data_block);
   printf("Number of blocks: %d\n", num_blocks);
@@ -144,7 +150,7 @@ int main (int argc, char* argv[]) {
   int * block_array = (int *) malloc(sizeof(int) * capacity);
   assert(block_array != NULL);
   struct inode_node * current = RECOVERY_CANDIDATES;
-  
+ 
   while (current != NULL) {
     int initial_size = size;
     
@@ -154,14 +160,15 @@ int main (int argc, char* argv[]) {
     // Do a quicksort on the array.
     qsort((void *)block_array, initial_size, sizeof(int), compareBlockId);
 
+    int explore_indirect_block = 1;
     // Loop over each block pointed to by this inode. Look up the block number
     // in block_array, if present we won't recover this file. Also look up the
     // block number in the block bitmap -- if not free, we won't recover. Add
     // new block numbers to the block array (thus claiming them for this file's
     // exclusive use).
-    for (i = 0; i < EXT2_N_BLOCKS; i++) {
+    for (i = 0; i < 12; i++) {
       if (current->data.i_block[i] == 0) {
-        // TODO: handle indirect blocks.
+        explore_indirect_block = 0;
         break;
       }
       if (bsearch((void *) &(current->data.i_block[i]), block_array, initial_size, sizeof(int), compareBlockId) != NULL) {
@@ -192,6 +199,18 @@ int main (int argc, char* argv[]) {
       }
     }
 
+    if (explore_indirect_block) {
+      lseek(fd, getByteOffset(current->data.i_block[12], super_block.s_first_data_block, block_size), SEEK_SET);
+      int32_t * first_indirect_block = (int32_t *) malloc(block_size);
+      assert(first_indirect_block != NULL);
+      assert(read(fd, first_indirect_block, block_size) == block_size);
+      for (i = 0; i < block_size / sizeof(int32_t); i++) {
+        if (first_indirect_block[i] == 0) {
+          break;
+        }
+      } // TODO: do the searching thing above, then look in the second and the third indirect blocks.
+    }
+
     if (recover) {
       // Recover this candidate.
       printf("We are going to recover file with inode #%d\n", current->data.i_ctime);
@@ -201,20 +220,28 @@ int main (int argc, char* argv[]) {
 
       // Open and create the file with proper name.
       // TODO: set the path correctly.
-      char path[26];
+      char path[30];
       sprintf(path, "./recoveredFiles/file-%04d", current->data.i_ctime);
       int recoveredFile = open(path, O_RDWR | O_CREAT); 
 
       int remaining_bytes = current->data.i_size;
-
+      printf("remaining bytes %d\n", remaining_bytes);
       // Write all the data blocks of the file to the file.
       for (i = 0; i < EXT2_N_BLOCKS; i++) {
         if (current->data.i_block[i] == 0) {
           // TODO: handle indirect blocks.
           break;
         }
-        int size_to_write = remaining_bytes % block_size;
+        
+        int size_to_write;
+        if (block_size >= remaining_bytes) {
+          size_to_write = remaining_bytes;
+        } else {
+          size_to_write = block_size;
+        }
+
         lseek(fd, getByteOffset(current->data.i_block[i], super_block.s_first_data_block, block_size), SEEK_SET);
+        printf("attempting to read %d bytes\n", size_to_write);
         the_block = (char *) malloc(size_to_write);
         assert(the_block != NULL);
         read(fd, the_block, size_to_write);
@@ -389,8 +416,18 @@ void explore_inode(int local_inode_index, int inode_table_block, int inode_size,
   // Read the inode.
   inode = (struct inode_node *) malloc(sizeof(struct inode_node));
   read(fd, inode, sizeof(struct ext2_inode));
-  
-  if (inode->data.i_size != 0) {
+
+  int32_t file_size = inode->data.i_size;
+  //long long upper_bits = inode->data.i_dir_acl;
+  //long long file_size = inode->data.i_size + (upper_bits << 32);
+  if (file_size > 0) {
+    /*if (upper_bits != 0) {
+    printf("upper 32 bits %d\n", inode->data.i_dir_acl);
+    printf("lower 32 bits %d\n", inode->data.i_size);
+    }*/
+
+    //printf("file size %lld\n", file_size);
+    
     // This is a candidate file which may have been deleted. 
 
     // First use the i_ctime field to store the indoe_number. We're not going to
