@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 
+struct inode_node * mergeSort(struct inode_node * head, int size); 
 void explore_blocks(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int block_group, int blocks_per_group);
 void explore_inode(int local_inode_index, int inode_table_block, int inode_size, int fd, int block_size, int first_data_block, int inode_number, int active, int inodes_per_group);
 void explore_inodes(int fd, struct ext2_group_desc * group_desc, int block_size, int first_data_block, int first_inode, int inode_table_block, int inode_size, int block_group, int inodes_per_group); 
@@ -26,7 +27,7 @@ struct inode_node {
 };
 
 static struct inode_node * RECOVERY_CANDIDATES = NULL;
-
+static int NUM_CANDIDATES = 0;
 
 int main (int argc, char* argv[]) {
   int i, fd, block_size, num_blocks, blocks_per_group, block_groups;
@@ -108,6 +109,8 @@ int main (int argc, char* argv[]) {
   }
   // TODO: sort the candidate list with merge sort by comparing dtines (larger
   // dtime = earlier in the list).
+  RECOVERY_CANDIDATES = mergeSort(RECOVERY_CANDIDATES, NUM_CANDIDATES);
+
   // TODO: go through each candidate, add blocks to a dynamically growing array
   // of sorted integers (use binary search, etc.)
   // If there ever is a collision, the current candidate should not be restored
@@ -120,6 +123,60 @@ int main (int argc, char* argv[]) {
   // adding blocks to the array.
   assert(close(fd) == 0);
   return 0;
+}
+
+struct inode_node * mergeSort(struct inode_node * head, int size) {
+  if (size <= 1) {
+    return head;
+  }
+
+  // Split the list into halfs.
+  int i; 
+  int bound = size / 2;
+  if (size % 2 == 0) {
+    bound--;
+  }
+  struct inode_node * first = head;
+  struct inode_node * second;
+  struct inode_node * cur = head;
+  for (i = 0; i < bound; i++) {
+    cur = cur->next;
+  }
+  second = cur->next;
+  cur->next = NULL;
+
+  // Sort each half.
+  first = mergeSort(first, size / 2 + size % 2);
+  second = mergeSort(second, size / 2);
+  
+  // Merge.
+  struct inode_node * result;
+  if (first->data.i_dtime >= second->data.i_dtime) {
+    result = first;
+    first = first->next;
+  } else {
+    result = second;
+    second = second->next;
+  }
+   
+  struct inode_node * current = result;
+  while (first != NULL && second != NULL) {
+    if (first->data.i_dtime >= second->data.i_dtime) {
+      current.next = first;  
+      first = first.next;
+    } else {
+      current.next = second;
+      second = second.next;
+    }
+    current = current.next;
+  }
+
+  if (first != NULL) {
+    current.next = first;
+  } else {
+    current.next = second;
+  }
+  return result;
 }
 
 int getGroupDescOffset(int group, int table_offset, int desc_size) {
@@ -197,6 +254,7 @@ void explore_inode(int local_inode_index, int inode_table_block, int inode_size,
     // Now we'll add this inode to the list of candidates.
     inode->next = RECOVERY_CANDIDATES; 
     RECOVERY_CANDIDATES = inode;
+    NUM_CANDIDATES++;
 
     // printf("Examining inode #%d which has ", inode_number);
     // printf("Delete time: %d\n", inode.i_dtime);
