@@ -391,7 +391,7 @@ int64_t getFileSize(int32_t lower_bits, int32_t upper_bits) {
 
 /* Returns the byte offset for the given block number. */
 int64_t getByteOffset(int32_t block_number) {
-  return SUPERBLOCK_OFFSET + (block_size * (block_number - super_block.s_first_data_block));
+  return (int64_t) block_size * block_number;
 }
 
 /* Performs merge sort on the given linked list of inode_nodes. */
